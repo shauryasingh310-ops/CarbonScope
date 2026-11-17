@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

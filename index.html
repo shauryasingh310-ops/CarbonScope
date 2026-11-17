@@ -1,0 +1,15 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CarbonScope — who emits what</title></head><body>
+<div id="globe" role="img" aria-label="Interactive globe coloured by CO2 emissions"></div>
+<header>
+  <h1>CarbonScope</h1>
+  <div class="seg" id="metric" role="group" aria-label="Metric">
+    <button data-m="co2" aria-pressed="true">Total</button><button data-m="pc" aria-pressed="false">Per person</button></div>
+  <label class="switch" title="Only show countries tracked daily by Carbon Monitor"><input type="checkbox" id="daily"><span class="track" aria-hidden="true"><span class="knob"></span></span><span class="switch-label">Daily-tracked only</span></label>
+  <div class="search"><input id="q" placeholder="Search a country" autocomplete="off" aria-label="Search a country"><ul id="results"></ul></div>
+</header>
+<aside id="drawer" hidden aria-live="polite"></aside>
+<div id="tip" hidden></div>
+<div id="legend"><span id="lmin"></span><i></i><span id="lmax"></span></div>
+<div id="status">Loading emissions data…</div>
+<script type="module" src="/src/main.js"></script></body></html>
