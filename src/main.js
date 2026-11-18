@@ -8,6 +8,10 @@ import { Chart, registerables } from 'chart.js';
 import { loadAll, flag, fmt, heat, contains, FUELS } from './data.js';
 Chart.register(...registerables);
 Chart.defaults.color = '#8b93a5'; Chart.defaults.borderColor = '#222c40';
+Chart.defaults.animation = matchMedia('(prefers-reduced-motion: reduce)').matches
+  ? false
+  : { duration: 800, easing: 'easeOutQuart' };
+Chart.defaults.transitions.active = { animation: { duration: 250 } };
 
 const $ = s => document.querySelector(s);
 let countries = [], metric = 'co2', dailyOnly = false, hover = null, selected = null, charts = [], goal = null, range = {};
@@ -64,22 +68,29 @@ function pick(e) {
 }
 
 let down = null; const tip = $('#tip');
+let autoRotateTimer = null;
+function resumeAutoRotate() {
+  if (autoRotateTimer) clearTimeout(autoRotateTimer);
+  autoRotateTimer = setTimeout(() => { controls.autoRotate = true; }, 2000);
+}
 renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; controls.autoRotate = false; });
+renderer.domElement.addEventListener('pointerup', e => { if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 5) { const c = pick(e); if (c) select(c); } down = null; resumeAutoRotate(); });
+renderer.domElement.addEventListener('pointerleave', () => resumeAutoRotate());
 renderer.domElement.addEventListener('pointermove', e => {
-  const c = pick(e);
+  const c = drawer.hidden ? pick(e) : null;
   if (c !== hover) { hover = c; paint(); renderer.domElement.style.cursor = c ? 'pointer' : 'grab'; }
   tip.hidden = !c; if (c) { tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 14 + 'px';
     tip.textContent = `${flag(c.iso2)} ${c.name} · ${c[metric] ? fmt(c[metric].v, metric === 'pc' ? 't' : 'Mt') : 'no data'}`; }
 });
-renderer.domElement.addEventListener('pointerup', e => {
-  if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 5) { const c = pick(e); if (c) select(c); }
-  down = null;
-});
 addEventListener('keydown', e => { if (e.key === 'Escape') close(); if (e.key === '/' && document.activeElement !== $('#q')) { e.preventDefault(); $('#q').focus(); } });
 
-document.querySelectorAll('#metric button').forEach(b => b.onclick = () => {
-  metric = b.dataset.m; document.querySelectorAll('#metric button').forEach(x => x.setAttribute('aria-pressed', x === b));
-  computeRange(); paint();
+document.querySelectorAll('#metric button').forEach(b => {
+  b.classList.add('metric-btn');
+  b.onclick = () => {
+    metric = b.dataset.m; document.querySelectorAll('#metric button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    computeRange(); paint();
+  }
+  b.addEventListener('focus', () => b.classList.add('focused'));
 });
 $('#daily').onchange = e => { dailyOnly = e.target.checked; paint(); };
 const results = $('#results');
@@ -94,7 +105,18 @@ $('#q').oninput = e => {
 };
 
 const drawer = $('#drawer');
-function close() { selected = null; drawer.hidden = true; charts.forEach(c => c.destroy()); charts = []; goal = null; paint(); }
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+function close() {
+  selected = null; goal = null;
+  document.body.classList.remove('drawer-open');
+  const finish = () => { drawer.hidden = true; drawer.classList.remove('entering', 'leaving'); charts.forEach(c => c.destroy()); charts = []; paint(); resumeAutoRotate(); };
+  if (drawer.hidden) return finish();
+  if (reduceMotion.matches) return finish();
+  if (close._t) clearTimeout(close._t);
+  drawer.classList.remove('entering');
+  drawer.classList.add('leaving');
+  close._t = setTimeout(finish, 280);
+}
 function select(c) {
   selected = c; controls.autoRotate = false; goal = toVec(c.cen[0], c.cen[1], 15).add(new THREE.Vector3(0, 1.5, 0)); paint();
   charts.forEach(x => x.destroy()); charts = [];
@@ -107,7 +129,11 @@ function select(c) {
       (mix.length ? ` ${mix[0][0]} accounts for ${Math.round(mix[0][1] / tot * 100)}% and ${mix[1][0].toLowerCase()} for ${Math.round(mix[1][1] / tot * 100)}%.` : '') +
       (then ? ` That is ${Math.abs(Math.round((now - then) / then * 100))}% ${now >= then ? 'more' : 'less'} than in 2000.` : '');
   }
+  document.body.classList.add('drawer-open');
   drawer.hidden = false;
+  if (close._t) { clearTimeout(close._t); close._t = null; }
+  drawer.classList.remove('leaving'); drawer.classList.add('entering');
+  drawer.scrollTop = 0;
   drawer.innerHTML = `<button class="x" aria-label="Close">×</button><h2>${flag(c.iso2)} ${c.name}</h2>
     <p class="sub">${c.cont}${c.daily ? ' · tracked daily by Carbon Monitor' : ''}</p>
     <div class="big">${l ? fmt(l.v) : '—'}</div>
@@ -119,18 +145,21 @@ function select(c) {
   drawer.querySelector('.x').onclick = close;
   if (!e) return;
   const years = Array.from({ length: e.co2.length }, (_, i) => 1900 + i);
+  const anim = !reduceMotion.matches;
   const line = (label, d, color) => ({ label, data: d, borderColor: color, borderWidth: 2, pointRadius: 0, tension: .25 });
   const c1 = new Chart($('#c1'), { type: 'line', data: { labels: years, datasets: [line(c.name, e.co2, '#ff8a3d')] },
-    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 6 } } }, interaction: { mode: 'index', intersect: false } } });
+    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 6 } } }, interaction: { mode: 'index', intersect: false },
+      animation: anim ? { duration: 900, easing: 'easeOutQuart' } : false } });
   charts.push(c1);
   $('#cmp').onchange = ev => {
     c1.data.datasets.length = 1; const o = countries.find(x => x.iso === ev.target.value);
     if (o) c1.data.datasets.push(line(o.name, o.em.co2, '#7fb4ff'));
-    c1.options.plugins.legend.display = !!o; c1.update();
+    c1.options.plugins.legend.display = !!o; c1.update(anim ? undefined : 'none');
   };
   if (e.m) charts.push(new Chart($('#c2'), { type: 'doughnut', data: { labels: FUELS, datasets: [{ data: FUELS.map(f => e.m[f]),
-    backgroundColor: ['#3b3f4f', '#c2455a', '#ff8a3d', '#8b93a5', '#ffe29a', '#6a4a8c'], borderWidth: 0 }] },
-    options: { cutout: '62%', plugins: { legend: { position: 'right' } } } }));
+    backgroundColor: ['#3b3f4f', '#c2455a', '#ff8a3d', '#8b93a5', '#ffe29a', '#6a4a8c'], borderWidth: 0, hoverOffset: 8, hoverBorderWidth: 0 }] },
+    options: { cutout: '62%', plugins: { legend: { position: 'right' } },
+      animation: anim ? { duration: 900, easing: 'easeOutQuart', animateRotate: true } : false } }));
 }
 
 function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
